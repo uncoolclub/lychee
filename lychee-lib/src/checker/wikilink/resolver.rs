@@ -1,4 +1,7 @@
-use crate::{BaseInfo, ErrorKind, Uri, checker::wikilink::index::WikilinkIndex};
+use crate::{
+    BaseInfo, ErrorKind, Uri,
+    checker::{fallback_candidates, wikilink::index::WikilinkIndex},
+};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
@@ -33,11 +36,10 @@ impl WikilinkResolver {
         })
     }
     /// Resolves a wikilink by searching the index with fallback extensions.
+    ///
+    /// Uses the shared fallback candidate ordering.
     pub(crate) fn resolve(&self, path: &Path, uri: &Uri) -> Result<PathBuf, ErrorKind> {
-        for ext in &self.fallback_extensions {
-            let mut candidate = path.to_path_buf();
-            candidate.set_extension(ext);
-
+        for candidate in fallback_candidates(path, &self.fallback_extensions) {
             if let Some(resolved) = self.checker.contains_path(&candidate) {
                 return Ok(resolved);
             }
@@ -64,6 +66,24 @@ mod tests {
         };
         let path = fixtures_path!().join("Usage");
         let expected_result = fixtures_path!().join("wiki/Usage.md");
+        assert_eq!(resolver.resolve(&path, &uri), Ok(expected_result));
+    }
+
+    #[test]
+    fn test_wikilink_resolves_dotted_filename() {
+        let resolver = WikilinkResolver::new(
+            &BaseInfo::from_path(&fixtures_path!().join("wiki")).unwrap(),
+            vec!["md".to_string()],
+        )
+        .unwrap();
+        let uri = Uri {
+            url: fixture_uri!("wiki/Page.v1"),
+        };
+        let path = fixtures_path!().join("Page.v1");
+
+        // `Page.md` also exists, and resolving to it would report the wikilink
+        // valid against a different page.
+        let expected_result = fixtures_path!().join("wiki/Page.v1.md");
         assert_eq!(resolver.resolve(&path, &uri), Ok(expected_result));
     }
 

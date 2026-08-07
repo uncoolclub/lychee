@@ -3,6 +3,7 @@ use log::warn;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
+use crate::checker::fallback_candidates;
 use crate::checker::wikilink::resolver::WikilinkResolver;
 use crate::{
     BaseInfo, ErrorKind, FragmentCheckerOptions, Result, Status, Uri,
@@ -155,9 +156,8 @@ impl FileChecker {
     /// Resolves a path to a file, applying fallback extensions if necessary.
     ///
     /// This function will try to find a file, first by attempting the given path
-    /// itself, then by attempting the path with each extension from
-    /// [`FileChecker::fallback_extensions`]. The first existing file (not directory),
-    /// if any, will be returned.
+    /// itself, then by attempting the candidates from [`fallback_candidates`].
+    /// The first existing file (not directory), if any, will be returned.
     ///
     /// # Arguments
     ///
@@ -174,25 +174,9 @@ impl FileChecker {
             return Ok(path.to_path_buf());
         }
 
-        let mut path_buf = path.to_path_buf();
-
-        // If existing "extension" has spaces, we assume it is not a real extension.
-        // In this case, we want to append fallbacks _after_ the full original filename.
-        if let Some(ext) = path.extension()
-            && ext.as_encoded_bytes().iter().any(u8::is_ascii_whitespace)
-            && let Some(first_fallback) = self.fallback_extensions.first()
-        {
-            let mut ext = ext.to_os_string();
-            ext.push(".");
-            ext.push(first_fallback);
-            path_buf.set_extension(ext);
-        }
-
-        // Try fallback extensions, replacing any current extension in the path.
-        for ext in &self.fallback_extensions {
-            path_buf.set_extension(ext);
-            if path_buf.is_file() {
-                return Ok(path_buf);
+        for candidate in fallback_candidates(path, &self.fallback_extensions) {
+            if candidate.is_file() {
+                return Ok(candidate);
             }
         }
 
@@ -672,20 +656,59 @@ mod tests {
             Ok("fallback-extensions/file2. hi.gz")
         );
 
-        // fallback extensions replace pre-existing extensions.
+        // when appending finds nothing, fallback extensions still replace a
+        // pre-existing extension.
         assert_resolves!(
             &checker,
             "fallback-extensions/b.non-existing",
             Ok("fallback-extensions/b.gz")
         );
 
-        // fallback extensions should *not* double up when there is
-        // already a file extension, to avoid doubling up and getting the
-        // wrong file.
+        // fallback extensions are appended past a pre-existing extension.
         assert_resolves!(
             &checker,
             "fallback-extensions/a.tar",
+            Ok("fallback-extensions/a.tar.gz")
+        );
+
+        // the appended form wins over the replaced one. `c.md` also exists, and
+        // resolving to it would report the link valid against a different file.
+        assert_resolves!(
+            &checker,
+            "fallback-extensions/c.d",
+            Ok("fallback-extensions/c.d.md")
+        );
+
+        // a whitespace "extension" is not one, so it is never replaced. `e.md`
+        // exists and `e. hi.md` does not, and resolving to `e.md` would report
+        // the link valid against a different file.
+        assert_resolves!(
+            &checker,
+            "fallback-extensions/e. hi",
             Err(InvalidFilePath(_))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fallback_candidates_preserve_extension_order() {
+        let checker = FileChecker::new(
+            &BaseInfo::none(),
+            vec!["html".to_string(), "htm".to_string()],
+            None,
+            FragmentCheckerOptions {
+                check_anchor_fragments: true,
+                check_text_fragments: false,
+            },
+            false,
+        )
+        .unwrap();
+
+        // `d.html` and `d.e.htm` both exist, so this distinguishes the
+        // configured extension order from the preference for appending.
+        assert_resolves!(
+            &checker,
+            "fallback-extensions/d.e",
+            Ok("fallback-extensions/d.html")
         );
     }
 }

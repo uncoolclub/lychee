@@ -522,6 +522,11 @@ Options:
           fallback extensions. Multiple extensions can be separated by commas. Extensions
           will be checked in order of appearance.
 
+          For each extension, lychee first appends it to the full file name, then
+          replaces an existing extension. So `a.b` with `html,htm` is looked up as
+          `a.b.html`, `a.html`, `a.b.htm`, `a.htm`. An extension containing
+          whitespace is taken to be part of the file name and is never replaced.
+
           Example: --fallback-extensions html,htm,php,asp,aspx,jsp,cgi
 
           Note: This option takes effect on `file://` URIs which do not exist and on
