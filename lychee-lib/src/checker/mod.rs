@@ -31,8 +31,9 @@ pub(crate) fn fallback_candidates<'a>(
 
     let original = std::iter::once(path.to_path_buf());
 
-    // Build from the file name rather than the whole path so that trailing
-    // slashes normalize like `set_extension`: `/a/b/` gives `/a/b.html`.
+    // Build from the file name rather than the whole path. A directory that
+    // resolves to itself through the `.` index file arrives here as `/a/b/.`,
+    // which gives `/a/b.html` rather than `/a/b/..html`.
     let appended = extensions.iter().filter_map(move |extension| {
         path.file_name().map(|file_name| {
             let mut file_name = file_name.to_os_string();
@@ -74,6 +75,11 @@ mod tests {
             candidates("a.tar", &["gz", "md"]),
             ["a.tar", "a.tar.gz", "a.tar.md", "a.gz", "a.md"]
         );
+    }
+
+    #[test]
+    fn a_directory_resolved_to_itself_appends_to_its_name() {
+        assert_eq!(candidates("a/b/.", &["html"]), ["a/b/.", "a/b.html"]);
     }
 
     #[test]
